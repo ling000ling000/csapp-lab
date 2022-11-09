@@ -6,14 +6,36 @@
 
 #include "cachelab.h"
 
+void usage(void) { exit(1); }
+
 int verbose = 0, s, E, b, S, B;
 
-void usage(void)
+int T = 0;
+
+typedef struct cacheLine
 {
-    exit(1);
+    int t; // 时刻，即是valid也是LRU的判断标志
+    __uint64_t tag; // 标记位
+    // 本来应该还有个block，这个lab不需要写高速缓存块
+}* cacheSet; // 组就是行的数组，也就是struct cacheLine*
+
+void init() // 初始化Cache
+{
+    Cache = (cacheSet *)malloc(sizeof(cacheSet) * S);
+    for (int i = 0; i < S; i ++ ) // 有S组
+    {
+        Cache[i] = (struct cacheLine *)malloc(sizeof(struct cacheLine) * E); // 每组有E行
+        for (int j = 0 ; j < E; j ++ ) Cache[i][j].t = 0; // 全部都未访问过，时间为0
+    }
 }
 
-FILE *opt(int argc, char* argv[])
+void freeCache() // 清空Cache
+{
+    for (int i = 0; i < S; i ++ ) free(Cache[i]);
+    free(Cache);
+}
+
+FILE *opt(int argc, char* argv[]) // 读取并处理命令行选项
 {
     FILE *tracefile;
 
@@ -44,10 +66,7 @@ FILE *opt(int argc, char* argv[])
     return tracefile;
 }
 
-void init()
-{
-
-}
+cacheSet *Cache; // 组的数组就是缓存
 
 int main(int argc, char* argv[])
 {
