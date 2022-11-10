@@ -42,23 +42,24 @@ void freeCache()
     free(Cache);
 }
 
-void setResult(cacheSet set, enum Category category, int tag, int pos, char *resultV) // pos是行位置
+// 设置缓存工作后的结果
+void setResult(cacheSet set, enum Category category, int tag, int pos, char resultV[]) // pos是行位置, category是当前缓存的工作状态
 {
-    result[category] ++;
-    set[pos].tag = tag;
-    set[pos].valid = T;
-    if (verbose) strcat(resultV, categoryString[category]); // 往resultV写入
+    result[category] ++; // 记录hit、miss、eviction发生的次数
+    set[pos].tag = tag; // 将w的tag写入缓存组的标记位
+    set[pos].valid = T; // LRU替换策略下，时间戳是valid
+    if (verbose) strcat(resultV, categoryString[category]); // 往resultV写入的当前行为是什么
 }
 
 // 缓存工作
 void findCache(__uint64_t tag, int setPos, char *resultV) // tag是w地址的t位
 {
     cacheSet set = Cache[setPos];
-    int minPos = 0, emptyLine = -1; // ；标记空行
+    int minPos = 0, emptyLine = -1; // 标记时间距离现在最远的行的位置，也就是valid最小的行，因为valid越小离现在越远；标记空行的位置
     for (int i = 0; i < E; i ++ ) // 遍历该set的每一行
     {
         struct cacheLine line = set[i]; // 当前set的第i行
-        if (!line.valid) // valid = 0，说明该line没有用过，标记一下
+        if (!line.valid) // valid = 0，说明该line没有用过
         {
             emptyLine = i; // 有空行
         }
@@ -66,17 +67,17 @@ void findCache(__uint64_t tag, int setPos, char *resultV) // tag是w地址的t�
         {
             if (line.tag == tag) // 行匹配
             {
-                setResult(set, HIT, tag, i, resultV); // 设置HIT
+                setResult(set, HIT, tag, i, resultV); // 设置HIT命中操作
                 return;
             }
-            if (set[minPos].valid > line.valid)
+            if (set[minPos].valid > line.valid) // 当前行的valid比已访问过最小valid还小
             {
-                minPos = i; // 取最小时刻值
+                minPos = i; // 更新最小valid的行的位置，它离现在最远
             }
         }
     }
-    setResult(set, MISS, tag, emptyLine, resultV);
-    if (emptyLine == -1) setResult(set, EVICTION, tag, minPos, resultV); // 要读或者写, 但是没有一个空行, 说明发生eviction
+    setResult(set, MISS, tag, emptyLine, resultV); // 缓存不命中
+    if (emptyLine == -1) setResult(set, EVICTION, tag, minPos, resultV); // 要读或者写, 但是没有一个空行, 发生eviction替换操作
 }
 
 // 读取并处理命令行选项
@@ -128,7 +129,7 @@ int main(int argc, char* argv[])
 
         char resultV[20]; // -v选项需要的“显示跟踪信息的可选详细标志”
         memset(resultV, 0, sizeof resultV);
-        T ++;
+        T ++; // 运行一次，时间戳+1
         findCache(wTag, setPos, resultV);
 
         if (op[0] == 'M') findCache(wTag, setPos, resultV);
