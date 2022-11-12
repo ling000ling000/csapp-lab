@@ -20,19 +20,51 @@ int is_transpose(int M, int N, int A[N][M], int B[M][N]);
  *     be graded. 
  */
 char transpose_submit_desc[] = "Transpose submission";
+void trans_32(int M, int N, int A[N][M], int B[M][N]);
 void transpose_submit(int M, int N, int A[N][M], int B[M][N])
 {
     switch (M)
     {
     case 32:
-        trans_32();
+        trans_32(M, N, A, B);
         break;
-    case 64:
-        trans_64();
-        break;
-    case 61:
-        trans_61();
-        break;
+    // case 64:
+    //     trans_64();
+    //     break;
+    // case 61:
+    //     trans_61();
+    //     break;
+    }
+}
+
+void trans_32(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j;
+    for (i = 0; i < M; i += 8)
+    {
+        for (j = 0; j < N; j += 8)
+        {
+            for (int ii = i; ii < i + 8; ii ++ )
+            {
+                int tmp1 = A[ii][j];
+                int tmp2 = A[ii][j + 1];
+                int tmp3 = A[ii][j + 2];
+                int tmp4 = A[ii][j + 3];
+                int tmp5 = A[ii][j + 4];
+                int tmp6 = A[ii][j + 5];
+                int tmp7 = A[ii][j + 6];
+                int tmp8 = A[ii][j + 7];
+
+                B[j][ii] = tmp1;
+                B[j + 1][ii] = tmp2;
+                B[j + 2][ii] = tmp3;
+                B[j + 3][ii] = tmp4;
+                B[j + 4][ii] = tmp5;
+                B[j + 5][ii] = tmp6;
+                B[j + 6][ii] = tmp7;
+                B[j + 7][ii] = tmp8;
+            }
+        }
     }
 }
 
