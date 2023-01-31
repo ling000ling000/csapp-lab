@@ -165,6 +165,37 @@ int main(int argc, char **argv)
 */
 void eval(char *cmdline) 
 {
+    char *argv[MAXARGS];
+    char buf[MAXLINE];
+    int bg;
+    int state;
+    pid_t pid;
+    sigset_t mask_all, mask_one, prev;
+
+    if (argv[0] == NULL) return; // 没有参数就退出
+
+    if (!builtin_cmd(argv))
+    {
+        if ((pid = fork()) == 0)
+        {
+            if (execve(argv[0], argv, environ) < 0)
+            {
+                // 正常运行execve函数会替换内存，不会返回/退出，所以必须要加exit，
+                // 否则会一直运行下去，子进程会开始运行父进程的代码
+                printf("%s: Command not found.\n", argv[0]);
+                exit(0);
+            }
+        }
+
+        if (!bg)
+        {
+            int status;
+            if (waitpid(pid, &status, 0) < 0)
+                unix_error("waitfg: waitpid error");
+        }
+        else
+            printf("%d %s", pid, cmdline);
+    }
     return;
 }
 
