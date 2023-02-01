@@ -174,11 +174,12 @@ void eval(char *cmdline)
 
     if (argv[0] == NULL) return; // 没有参数就退出
 
+    // 判断是否为内置命令
     if (!builtin_cmd(argv))
     {
         if ((pid = fork()) == 0)
         {
-            if (execve(argv[0], argv, environ) < 0)
+            if (execve(argv[0], argv, environ) < 0) // 执行失败的话
             {
                 // 正常运行execve函数会替换内存，不会返回/退出，所以必须要加exit，
                 // 否则会一直运行下去，子进程会开始运行父进程的代码
@@ -187,14 +188,14 @@ void eval(char *cmdline)
             }
         }
 
+        // 前台程序需要等待执行完成
         if (!bg)
         {
             int status;
             if (waitpid(pid, &status, 0) < 0)
                 unix_error("waitfg: waitpid error");
         }
-        else
-            printf("%d %s", pid, cmdline);
+        else printf("%d %s", pid, cmdline);
     }
     return;
 }
@@ -260,8 +261,10 @@ int parseline(const char *cmdline, char **argv)
  * builtin_cmd - If the user has typed a built-in command then execute
  *    it immediately.  
  */
-int builtin_cmd(char **argv) 
+int builtin_cmd(char **argv) // 内置命令
 {
+    if (!strcmp(argv[0], "quit")) exit(0);
+    if (!strcmp(argv[0], "&")) return 1;
     return 0;     /* not a builtin command */
 }
 
