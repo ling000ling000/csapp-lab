@@ -163,7 +163,7 @@ int main(int argc, char **argv)
  * background children don't receive SIGINT (SIGTSTP) from the kernel
  * when we type ctrl-c (ctrl-z) at the keyboard.  
 */
-void eval(char *cmdline) 
+void eval(char *cmdline) // 解析并执行命令
 {
     char *argv[MAXARGS];
     char buf[MAXLINE];
@@ -172,13 +172,30 @@ void eval(char *cmdline)
     pid_t pid;
     sigset_t mask_all, mask_one, prev;
 
+    strcpy(buf, cmdline);
+    bg = parseline(buf, argv);
+
     if (argv[0] == NULL) return; // 没有参数就退出
 
     // 判断是否为内置命令
     if (!builtin_cmd(argv))
     {
+        // 在函数内部加阻塞列表，不然之后可能会出现不痛不痒的bug
+        sigfillset(&mask_all);
+        sigemptyset(&mask_one);
+        sigaddset(&mask_one, &mask_all);
+        sigprocmask(SIG_BLOCK, &mask_one, &prev);
+
         if ((pid = fork()) == 0)
         {
+            // 子进程继承了父进程的阻塞向量，也要解除阻塞，
+            // 避免收不到它本身的子进程的信号 
+            sigprocmask(SIG_SETMASK, &prev, NULL);
+            if (setpgid(0, 0) < 0)
+            {
+                perror("SETPGID ERROR");
+                exit(0);
+            }
             if (execve(argv[0], argv, environ) < 0) // 执行失败的话
             {
                 // 正常运行execve函数会替换内存，不会返回/退出，所以必须要加exit，
@@ -186,6 +203,15 @@ void eval(char *cmdline)
                 printf("%s: Command not found.\n", argv[0]);
                 exit(0);
             }
+        }
+        else
+        {
+            if (!bg) state = FG;
+            else state = BG;
+            // 依然加塞，阻塞所有信号
+            sigprocmask(SIG_BLOCK, &mask_all, NULL);
+            addjob(jobs, pid, state, cmdline);
+            sigprocmask(SIG_SETMASK, &prev, NULL);
         }
 
         // 前台程序需要等待执行完成
@@ -261,7 +287,7 @@ int parseline(const char *cmdline, char **argv)
  * builtin_cmd - If the user has typed a built-in command then execute
  *    it immediately.  
  */
-int builtin_cmd(char **argv) // 内置命令
+int builtin_cmd(char **argv) // 判断是否是内置命令
 {
     if (!strcmp(argv[0], "quit")) exit(0);
     if (!strcmp(argv[0], "&")) return 1;
