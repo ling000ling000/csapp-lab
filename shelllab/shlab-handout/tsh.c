@@ -178,12 +178,12 @@ void eval(char *cmdline) // 解析并执行命令
     if (argv[0] == NULL) return; // 没有参数就退出
 
     // 判断是否为内置命令
-    if (!builtin_cmd(argv))
+    if (!builtin_cmd(argv)) // 如果不是
     {
-        // 在函数内部加阻塞列表，不然之后可能会出现不痛不痒的bug
+        // 涉及并发访问，在函数内部加阻塞列表，阻塞所有信号
         sigfillset(&mask_all);
         sigemptyset(&mask_one);
-        sigaddset(&mask_one, &mask_all);
+        sigaddset(&mask_one, SIGCHLD);
         sigprocmask(SIG_BLOCK, &mask_one, &prev);
 
         if ((pid = fork()) == 0)
@@ -206,9 +206,8 @@ void eval(char *cmdline) // 解析并执行命令
         }
         else
         {
-            if (!bg) state = FG;
-            else state = BG;
-            // 依然加塞，阻塞所有信号
+            state = bg ? BG : FG;
+            // 依然阻塞所有信号
             sigprocmask(SIG_BLOCK, &mask_all, NULL);
             addjob(jobs, pid, state, cmdline);
             sigprocmask(SIG_SETMASK, &prev, NULL);
@@ -216,12 +215,9 @@ void eval(char *cmdline) // 解析并执行命令
 
         // 前台程序需要等待执行完成
         if (!bg)
-        {
-            int status;
-            if (waitpid(pid, &status, 0) < 0)
-                unix_error("waitfg: waitpid error");
-        }
-        else printf("%d %s", pid, cmdline);
+            waitfg(pid);
+        else 
+            printf("[%d] (%d) %s",pid2jid(pid), pid, cmdline);
     }
     return;
 }
@@ -289,8 +285,20 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) // 判断是否是内置命令
 {
-    if (!strcmp(argv[0], "quit")) exit(0);
-    if (!strcmp(argv[0], "&")) return 1;
+    if (!strcmp(argv[0], "quit")) 
+        exit(0);
+    if (!strcmp(argv[0], "&")) 
+        return 1;
+    if (!strcmp(argv[0], "bg") || !strcmp(argv[0], "fg")) 
+    {
+        do_bgfg(argv); 
+        return 1;
+    }
+    if (!strcmp(argv[0], "jobs"))
+    {
+        listjobs(jobs);
+        return 1;
+    }
     return 0;     /* not a builtin command */
 }
 
@@ -299,6 +307,54 @@ int builtin_cmd(char **argv) // 判断是否是内置命令
  */
 void do_bgfg(char **argv) 
 {
+    struct job_t *job = NULL; // 要处理的job
+    int state; // 输入的命令
+    int id; // 存储jid或者pid
+
+    if (!strcmp(argv[0], "bg"))
+        state = BG;
+    else
+        state = FG;
+
+    if (argv[1] == NULL) // 没有参数的情况
+    {
+        printf("%s command requires PID or %%jobid argument\n", argv[0]);
+        return;
+    }
+    if (argv[1][0] == '%') // jid的情况
+    {
+        if (sscanf(&argv[1][1], "%d", &id) > 0)
+        {
+            job = getjobjid(jobs, id); // 获取jid
+            if (job == NULL)
+            {
+                printf("%%%d: No such job\n", id);
+                return;
+            }
+        }
+    }
+    else if (!isdigit(argv[1][0])) // 非法输入的情况
+    {
+        printf("%s: argument must be a PID or %%jobid\n", argv[0]);
+    }
+    else // pid的情况
+    {
+        id = atoi(argv[1]);
+        job = getjobpid(jobs, id);
+        if (job == NULL)
+        {
+            printf("(%d): No such process\n", id);
+            return;
+        }
+    }
+
+    kill(-(job -> pid), SIGCONT); // 重启进程, 这里发送到进程组
+    job -> state = state;
+    if (state == BG)
+        printf("[%d] (%d) %s",job->jid, job->pid, job->cmdline);
+    else
+        waitfg(job->pid);
+
     return;
 }
 
@@ -307,6 +363,10 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
+    sigset_t mask;
+    sigemptyset(&mask);
+    while (fgpid(jobs) != 0)
+        sigsuspend(&mask);
     return;
 }
 
