@@ -24,9 +24,9 @@
  ********************************************************/
 team_t team = {
     /* Team name */
-    "ateam",
+    "ASoul",
     /* First member's full name */
-    "Harry Bovik",
+    "Diana",
     /* First member's email address */
     "bovik@cs.cmu.edu",
     /* Second member's full name (leave blank if none) */
@@ -44,11 +44,20 @@ team_t team = {
 
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 
+// 头部脚部的大小
+#define WSIZE 4
+
+// 双字
+#define DSIZE 8
+
+
+
 /* 
  * mm_init - initialize the malloc package.
  */
 int mm_init(void)
 {
+
     return 0;
 }
 
