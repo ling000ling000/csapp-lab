@@ -50,6 +50,13 @@ team_t team = {
 // 双字
 #define DSIZE 8
 
+// 拓展堆时的默认大小
+#define CHUNKSIZE (1 << 12)
+
+#define MAX(x, y) (x > y ? x : y)
+
+// 设置头部和脚部的值, 块大小+分配位
+#define PACK(size, alloc) ((size) | (alloc))
 
 
 /* 
