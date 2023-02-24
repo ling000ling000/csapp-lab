@@ -58,6 +58,21 @@ team_t team = {
 // 设置头部和脚部的值, 块大小+分配位
 #define PACK(size, alloc) ((size) | (alloc))
 
+// 在地址 p 读写一个字
+#define GET(P)      (*(unsigned int *)(p)) 
+#define PUT(p, val) (*(unsigned int *)(p) = (val))
+
+// 从地址 p 读取大小和已分配的字段
+#define GET_SIZE(p)  (GET(p) & ~0x7)
+#define FET_ALLOC(p) (GET(p) & 0x1)
+
+// 给定有效载荷指针, 找到头部和脚部
+#define HDRP(bp) ((char *)(bp) - WSIZE)
+#define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
+
+// 给定有效载荷指针, 找到前一块或下一块
+#define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
+#define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
 /* 
  * mm_init - initialize the malloc package.
