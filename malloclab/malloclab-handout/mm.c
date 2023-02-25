@@ -74,13 +74,50 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
+// 总是指向序言块的第二块
+static char *heap_list;
+
 /* 
  * mm_init - initialize the malloc package.
  */
 int mm_init(void)
 {
+    // 申请四个字节空间
+    if ((heap_list = men_sbrk(4 * WSIZE)) == (void *)-1)
+        return -1;
 
+    PUT(heap_list, 0);                            // 对齐填充
+    PUT(heap_list + (1 * WSIZE), PACK(DSIZE, 1)); // 序言块头部
+    PUT(heap_list + (2 * WSIZE), PACK(DSIZE, 1)); // 序言块脚部
+    PUT(heap_list + (3 * WSIZE), PACK(0, 1));     // 结尾块
+    heap_list += (2 * WSIZE);     
+
+    // 在空堆外部放置一个 CHUNKSIZE 字节的空闲块
+    if (extern_heap(CHUNKSIZE / WSIZE) == NULL)
+        return -1;                
+    
     return 0;
+}
+
+// 扩展heap, 传入的是字节数
+static void *extern_heap(size_t words)
+{
+    // bp总是指向有效载荷
+    char *bp;
+    size_t size;
+
+   // 分配偶数个字，以保持对齐
+    size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE; // 根据传入字节数奇偶, 考虑对齐
+    if ((long)(bp = men_sbrk(size)) == -1) // 分配
+        return NULL;
+
+    // 
+    PUT(HDRP(bp), PACK(size, 0)); // 空闲块头
+    PUT(FTRP(bp), PACK(size, 0)); // 空闲块脚
+    PUT(HDPR(NEXT_BLKP(bp)), PACK(0, 1)); // 片的新结尾块
+
+    // 判断相邻块是否是空闲块, 进行合并
+    return coalesce(bp);
 }
 
 /* 
