@@ -74,6 +74,16 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
+// 给定序号，找到链表头节点位置
+#define GET_HEAD(num) ((unsigned int *)(long)(GET(heap_list + WSIZE * num)))
+
+// 给定bp，找到前驱和后驱
+#define GET_PRE(bp) ((unsigned int *)(long)(GET(bp)))
+#define GET_SUC(bp) ((unsigned int *)(long)(GET((unsigned int *)bp + 1)))
+
+// 理论上来说，设置的大小类越多，时间性能要越好，因而设置 20 个大小类
+#define CLASS_SIZE 20
+
 // 总是指向序言块的第二块
 static char *heap_list;
 
@@ -81,6 +91,9 @@ static void *extend_heap(size_t words);     //扩展堆
 static void *coalesce(void *bp);            //合并空闲块
 static void *find_fit(size_t asize);        //首次适配
 static void place(void *bp, size_t asize);  //分割空闲块
+static void delete(void *bp);               //从相应链表中删除块
+static void insert(void *bp);               //在对应链表中插入块
+static int search(size_t size);             //根据块大小, 找到头节点位置
 
 /* 
  * mm_init - initialize the malloc package.
@@ -88,19 +101,22 @@ static void place(void *bp, size_t asize);  //分割空闲块
 int mm_init(void)
 {
     // 申请四个字节空间
-    if ((heap_list = mem_sbrk(4 * WSIZE)) == (void *)-1)
+    if ((heap_list = mem_sbrk((4 + CLASS_SIZE) * WSIZE)) == (void *) - 1)
         return -1;
 
-    PUT(heap_list, 0);                            // 对齐填充
-    PUT(heap_list + (1 * WSIZE), PACK(DSIZE, 1)); // 序言块头部
-    PUT(heap_list + (2 * WSIZE), PACK(DSIZE, 1)); // 序言块脚部
-    PUT(heap_list + (3 * WSIZE), PACK(0, 1));     // 结尾块
-    heap_list += (2 * WSIZE);     
+    // 初始化20个大小类头指针
+    for (int i = 0; i < CLASS_SIZE; i ++ )
+        PUT(heap_list + i * WSIZE, NULL);
+
+    PUT(heap_list + CLASS_SIZE * WSIZE, 0); // 对齐填充
+    PUT(heap_list + ((1 + CLASS_SIZE) * WSIZE), PACK(DSIZE, 1)); // 序言块头部
+    PUT(heap_list + ((2 + CLASS_SIZE) * WSIZE), PACK(DSIZE, 1)); // 序言块脚步
+    PUT(heap_list + ((3 + CLASS_SIZE) * WSIZE), PACK(0, 1)); // 结尾块
 
     // 在空堆外部放置一个 CHUNKSIZE 字节的空闲块
     if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
-        return -1;                
-    
+        return -1;
+
     return 0;
 }
 
@@ -113,7 +129,9 @@ static void *extend_heap(size_t words)
 
    // 分配偶数个字，以保持对齐
     size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE; // 根据传入字节数奇偶, 考虑对齐
-    if ((long)(bp = mem_sbrk(size)) == -1) // 分配
+    
+    // 分配
+    if ((long)(bp = mem_sbrk(size)) == -1) 
         return NULL;
 
     // 初始化空闲块的页眉/页脚和结尾页眉
@@ -123,6 +141,69 @@ static void *extend_heap(size_t words)
 
     // 判断相邻块是否是空闲块, 进行合并
     return coalesce(bp);
+}
+
+// 找到块大小对应的等价类的序号
+int search(size_t size)
+{
+    int i;
+    for (i = 4; i <= 22; i ++ )
+        if (size <= (1 << i))
+            return i - 4;
+
+    return i - 4;
+}
+
+// 插入块，将块插到表头，涉及双向链表的插入删除
+void insert(void *bp)
+{
+    // 块的大小
+    size_t size = GET_SIZE(HDRP(bp));
+    // 根据块大小找到头节点位置
+    int num = search(size);
+    
+    // 如果是空的直接插入
+    if (GET_HEAD(num) == NULL)
+    {
+        PUT(heap_list + WSIZE * num, bp);
+        PUT(bp, NULL); // 前驱
+        PUT((unsigned int *)bp + 1, NULL); // 后继
+    } 
+    else
+    {
+        PUT((unsigned int *)bp +1, GET_HEAD(num)); // bp后继放第一个节点
+        PUT(GET_HEAD(num), bp); // 第一个节点的前驱放bo
+        PUT(bp, NULL); // bp的前驱为空
+        PUT(heap_list + WSIZE * num, bp); // 头节点放bp
+    }
+}
+
+// 删除块，删除指针
+void delete(void *bp)
+{
+    size_t size = GET_SIZE(HDRP(bp));
+    int num = search(size);
+
+    // 当前节点为唯一节点（前驱和后继都为null），就把头节点设为null
+    if (GET_PRE(bp) == NULL && GET_SUC(bp) == NULL)
+        PUT(heap_list + WSIZE * num, NULL);
+    // 当前节点为最后一个节点，就把当前节点的前驱和后继都设为null
+    else if (GET_PRE(bp) != NULL && GET_SUC(bp) == NULL)
+        PUT(GET_PRE(bp) + 1, NULL);
+    // 当前节点为第一个节点，就把头节点设为bp的后继
+    else if (GET_SUC(bp) != NULL && GET_PRE(bp) == NULL)
+    {
+        PUT(heap_list + WSIZE * num, GET_SUC(bp));
+        PUT(GET_SUC(bp), NULL);
+    }
+    // 处在中间的节点，当前节点的前驱 的后继 设为当前节点的后继，当前节点的后继 的前驱 设为当前节点的前驱
+    else if (GET_PRE(bp) != NULL && GET_SUC(bp) != NULL)
+    {
+        // GET_PRE(bp) + 1是bp指向的块 的前驱 的后继 的位置
+        // GET_PRE(bp + 1)是bp指向的块 的后继
+        PUT(GET_PRE(bp) + 1, GET_SUC(bp)); 
+        PUT(GET_SUC(bp), GET_PRE(bp));
+    }
 }
 
 /* 
@@ -174,6 +255,9 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *bp)
 {
+    if (bp == 0)
+        return;
+
     size_t size = GET_SIZE(HDRP(bp));
 
     PUT(HDRP(bp), PACK(size, 0));
@@ -184,19 +268,21 @@ void mm_free(void *bp)
 // 合并空闲块
 static void *coalesce(void *bp)
 {
-    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
-    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
-    size_t size = GET_SIZE(HDRP(bp));
+    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp))); // 前一块大小
+    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp))); // 后一块大小
+    size_t size = GET_SIZE(HDRP(bp)); // 当前块大小
 
     // 四种情况：前后都不空, 前不空后空, 前空后不空, 前后都空
     // 前后都不空
     if (prev_alloc && next_alloc)
     {
+        insert(bp);
         return bp;
     }
     // 前不空后空
     else if (prev_alloc && !next_alloc)
     {
+        delete(NEXT_BLKP(bp)); // 将后面的块从链表中删除
         size += GET_SIZE(HDRP(NEXT_BLKP(bp))); // 增加当前块大小
         PUT(HDRP(bp), PACK(size, 0)); // 修改头部
         PUT(FTRP(bp), PACK(size, 0)); // 根据头部大小定位尾部
@@ -204,6 +290,7 @@ static void *coalesce(void *bp)
     // 前空后不空
     else if (!prev_alloc && next_alloc)
     {
+        delete(PREV_BLKP(bp)); // 将其前面的快从链表中删除
         size += GET_SIZE(HDRP(PREV_BLKP(bp))); // 增加当前块大小
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
@@ -212,11 +299,15 @@ static void *coalesce(void *bp)
     // 都空
     else
     {
+        delete(NEXT_BLKP(bp)); // 将前后两个块都从其链表中删除
+        delete(PREV_BLKP(bp));
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp))); // 增加当前块大小
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
+
+    insert(bp); // 空闲块准备好后,将其插入合适位置
 
     return bp;
 } 
@@ -224,11 +315,21 @@ static void *coalesce(void *bp)
 // 首次适配
 static void *find_fit(size_t asize)
 {
-    void *bp;
-    for (bp = heap_list; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp))
+    int num = search(asize);
+    unsigned int *bp;
+
+    // 如果找不到合适的块，那就搜索更大的大小类
+    while (num < CLASS_SIZE)
     {
-        if (GET_SIZE(HDRP(bp)) >= asize && !GET_ALLOC(HDRP(bp)))
-            return bp;
+        bp = GET_HEAD(num);
+        // 遍历当前的整个链表
+        while (bp)
+        {
+            if (GET_SIZE(HDRP(bp)) >= asize)
+                return (void *)bp;
+            bp = GET_SUC(bp); // 用后继找下一块
+        }
+        num ++; // 找不到则进入下一个大小类
     }
     return NULL;
 }
@@ -239,13 +340,15 @@ static void place(void *bp, size_t asize)
     size_t csize = GET_SIZE(HDRP(bp));
 
     // 判断是否能够分离空闲块
+    delete(bp);
     if (csize - asize >= 2 * DSIZE)
     {
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
-        bp = NEXT_BLKP(bp);
+        bp = NEXT_BLKP(bp); // bp指向空闲块
         PUT(HDRP(bp), PACK(csize - asize, 0));
         PUT(FTRP(bp), PACK(csize - asize, 0));
+        insert(bp); // 加入分离出来的空闲块
     }
     else // 设置为填充
     {
